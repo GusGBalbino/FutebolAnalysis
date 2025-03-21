@@ -1,0 +1,13 @@
+train: /home/ggb/RoboFlowYolo/train/images
+val: /home/ggb/RoboFlowYolo/valid/images
+test: /home/ggb/RoboFlowYolo/test/images
+
+nc: 6
+names: ['Ball', 'GK1', 'GK2', 'Refree', 'Team1', 'Team2']
+
+roboflow:
+  workspace: studys
+  project: version2-f2jph-azqee
+  version: 1
+  license: Private
+  url: https://universe.roboflow.com/studys/version2-f2jph-azqee/dataset/1
