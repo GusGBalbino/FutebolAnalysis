@@ -1,6 +1,6 @@
-train: /home/ggb/RoboFlowYolo/train/images
-val: /home/ggb/RoboFlowYolo/valid/images
-test: /home/ggb/RoboFlowYolo/test/images
+train: C:\Users\Raphael Rissolo\Desktop\FutebolAnalysis\train
+val: C:\Users\Raphael Rissolo\Desktop\FutebolAnalysis\valid
+test: C:\Users\Raphael Rissolo\Desktop\FutebolAnalysis\test
 
 nc: 6
 names: ['Ball', 'GK1', 'GK2', 'Refree', 'Team1', 'Team2']
