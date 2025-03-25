@@ -1,0 +1,25 @@
+=== RELATÓRIO DE ANÁLISE DE FUTEBOL ===
+
+POSSE DE BOLA:
+Time 1: 25.00%
+Time 2: 75.00%
+
+DISTÂNCIA PERCORRIDA:
+Time 1 (total): 414.22 metros
+Time 2 (total): 1607.62 metros
+
+VELOCIDADES:
+Time 1 (média): 4.15 m/s
+Time 1 (máxima): 12.00 m/s
+Time 2 (média): 3.67 m/s
+Time 2 (máxima): 12.00 m/s
+
+POSSE DE BOLA POR ZONA:
+Terço defensivo (Time 1): 23.80%
+Terço médio (Time 1): 17.33%
+Terço ofensivo (Time 1): 8.87%
+Terço defensivo (Time 2): 8.87%
+Terço médio (Time 2): 17.33%
+Terço ofensivo (Time 2): 23.80%
+
+Relatório gerado em: 2025-03-24 14:54:54
