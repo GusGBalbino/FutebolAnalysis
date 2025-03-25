@@ -7,6 +7,8 @@ import numpy as np
 import albumentations as A
 from pathlib import Path
 import shutil
+import glob
+from tqdm import tqdm
 
 # Configurações
 MODELO_BASE = 'yolo12n.pt'
@@ -23,6 +25,29 @@ if os.path.exists(TEMP_DIR):
 os.makedirs(TEMP_DIR, exist_ok=True)
 os.makedirs(os.path.join(TEMP_DIR, 'images'), exist_ok=True)
 os.makedirs(os.path.join(TEMP_DIR, 'labels'), exist_ok=True)
+
+def normalize_bboxes(bboxes, img_width, img_height):
+    """
+    Normaliza as coordenadas das bounding boxes para o intervalo [0, 1]
+    
+    Args:
+        bboxes: Lista de bounding boxes no formato [x_min, y_min, x_max, y_max, class_id]
+        img_width: Largura da imagem
+        img_height: Altura da imagem
+        
+    Returns:
+        Lista de bounding boxes normalizadas
+    """
+    normalized_bboxes = []
+    for bbox in bboxes:
+        x_min, y_min, x_max, y_max, class_id = bbox
+        # Normalizar coordenadas
+        x_min = max(0, min(1, x_min / img_width))
+        y_min = max(0, min(1, y_min / img_height))
+        x_max = max(0, min(1, x_max / img_width))
+        y_max = max(0, min(1, y_max / img_height))
+        normalized_bboxes.append([x_min, y_min, x_max, y_max, class_id])
+    return normalized_bboxes
 
 def preprocess_and_augment():
     """Pré-processamento avançado e augmentação específica para futebol"""
@@ -48,16 +73,16 @@ def preprocess_and_augment():
         A.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=0.5),
         
         # Transformações geométricas moderadas - a câmera é fixa, mas pode haver pequenas variações
-        A.ShiftScaleRotate(shift_limit=0.1, scale_limit=0.2, rotate_limit=10, p=0.5),
+        A.Affine(scale=(0.8, 1.2), translate_percent=(-0.1, 0.1), rotate=(-10, 10), p=0.5),
         
         # Adiciona ruído para aumentar robustez
-        A.GaussNoise(var_limit=(10.0, 50.0), p=0.3),
+        A.GaussNoise(std_range=[0.1, 0.2], mean_range=[0, 0], p=0.3),
         
         # Blur para simular diferentes qualidades de vídeo
         A.GaussianBlur(blur_limit=(3, 7), p=0.3),
         
         # Ocasionalmente adiciona sombras para aumentar robustez
-        A.RandomShadow(shadow_roi=(0, 0, 1, 1), num_shadows_lower=1, num_shadows_upper=3, p=0.3),
+        A.RandomShadow(shadow_roi=(0, 0, 1, 1), p=0.3),
     ], bbox_params=A.BboxParams(format='yolo', label_fields=['class_labels']))
     
     # Processar imagens de treinamento
@@ -69,6 +94,10 @@ def preprocess_and_augment():
         # Carregar imagem
         img_name = os.path.basename(img_path)
         img = cv2.imread(img_path)
+        if img is None:
+            print(f"Erro ao carregar imagem: {img_path}")
+            continue
+            
         h, w, _ = img.shape
         
         # Carregar labels
@@ -88,103 +117,50 @@ def preprocess_and_augment():
                     
                     # Filtrar objetos muito pequenos (provável ruído ou fora do campo)
                     if width * height > 0.0001:  # Limite mínimo de área
+                        # Converter para formato [x_min, y_min, x_max, y_max]
+                        x_min = x_center - width/2
+                        y_min = y_center - height/2
+                        x_max = x_center + width/2
+                        y_max = y_center + height/2
+                        
+                        # Garantir que as coordenadas estejam no intervalo [0, 1]
+                        x_min = max(0, min(1, x_min))
+                        y_min = max(0, min(1, y_min))
+                        x_max = max(0, min(1, x_max))
+                        y_max = max(0, min(1, y_max))
+                        
+                        # Converter de volta para formato YOLO
+                        x_center = (x_min + x_max) / 2
+                        y_center = (y_min + y_max) / 2
+                        width = x_max - x_min
+                        height = y_max - y_min
+                        
                         bboxes.append([x_center, y_center, width, height])
                         class_labels.append(class_id)
             
             # Aplicar augmentação se houver bounding boxes
             if bboxes:
-                # Augmentação normal
-                transformed = transform(image=img, bboxes=bboxes, class_labels=class_labels)
-                aug_img = transformed['image']
-                aug_bboxes = transformed['bboxes']
-                aug_labels = transformed['class_labels']
-                
-                # Salvar imagem augmentada
-                aug_img_path = os.path.join(TEMP_DIR, 'images', f"aug_{i}_{img_name}")
-                cv2.imwrite(aug_img_path, aug_img)
-                
-                # Salvar labels augmentados
-                aug_label_path = os.path.join(TEMP_DIR, 'labels', f"aug_{i}_{img_name.rsplit('.', 1)[0]}.txt")
-                with open(aug_label_path, 'w') as f:
-                    for label_idx, bbox in enumerate(aug_bboxes):
-                        x_center, y_center, width, height = bbox
-                        class_id = aug_labels[label_idx]
-                        f.write(f"{class_id} {x_center} {y_center} {width} {height}\n")
-                
-                # Criar versão com mudança de cor nos uniformes
-                # Isso ajuda o modelo a ser invariante às cores específicas
-                hsv_img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-                
-                # Mudar matiz (cor) mantendo saturação e valor
-                # Alterando cores dos uniformes sem afetar o verde do campo
-                hue_shift = np.random.randint(20, 160)
-                hsv_img[..., 0] = (hsv_img[..., 0] + hue_shift) % 180
-                
-                # Converter de volta para BGR
-                color_varied_img = cv2.cvtColor(hsv_img, cv2.COLOR_HSV2BGR)
-                
-                # Salvar imagem com cores variadas
-                color_img_path = os.path.join(TEMP_DIR, 'images', f"color_{i}_{img_name}")
-                cv2.imwrite(color_img_path, color_varied_img)
-                
-                # Salvar labels (mesmas coordenadas)
-                color_label_path = os.path.join(TEMP_DIR, 'labels', f"color_{i}_{img_name.rsplit('.', 1)[0]}.txt")
-                with open(color_label_path, 'w') as f:
-                    for label_idx, bbox in enumerate(bboxes):
-                        x_center, y_center, width, height = bbox
-                        class_id = class_labels[label_idx]
-                        f.write(f"{class_id} {x_center} {y_center} {width} {height}\n")
-                
-                # Técnica adicional: Aplicar máscara somente ao campo
-                # Isso ensina o modelo a focar apenas nos objetos dentro do campo
-                if i % 4 == 0:  # Aplicar em 25% das imagens
-                    # Detector simples de campo baseado em cor verde
-                    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-                    lower_green = np.array([35, 40, 40])
-                    upper_green = np.array([90, 255, 255])
-                    mask = cv2.inRange(hsv, lower_green, upper_green)
+                try:
+                    # Augmentação normal
+                    transformed = transform(image=img, bboxes=bboxes, class_labels=class_labels)
+                    aug_img = transformed['image']
+                    aug_bboxes = transformed['bboxes']
+                    aug_labels = transformed['class_labels']
                     
-                    # Dilatação para incluir linhas brancas
-                    kernel = np.ones((5, 5), np.uint8)
-                    mask = cv2.dilate(mask, kernel, iterations=2)
+                    # Salvar imagem augmentada
+                    aug_img_path = os.path.join(TEMP_DIR, 'images', f"aug_{i}_{img_name}")
+                    cv2.imwrite(aug_img_path, aug_img)
                     
-                    # Encontrar contorno do campo
-                    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                    if contours:
-                        # Pegar o maior contorno (provavelmente o campo)
-                        field_contour = max(contours, key=cv2.contourArea)
-                        
-                        # Criar nova máscara apenas com contorno do campo
-                        field_mask = np.zeros_like(mask)
-                        cv2.drawContours(field_mask, [field_contour], 0, 255, -1)
-                        
-                        # Aplicar máscara nas labels - remover objetos fora do campo
-                        filtered_bboxes = []
-                        filtered_labels = []
-                        
-                        for label_idx, bbox in enumerate(bboxes):
+                    # Salvar labels augmentados
+                    aug_label_path = os.path.join(TEMP_DIR, 'labels', f"aug_{i}_{img_name.rsplit('.', 1)[0]}.txt")
+                    with open(aug_label_path, 'w') as f:
+                        for label_idx, bbox in enumerate(aug_bboxes):
                             x_center, y_center, width, height = bbox
-                            
-                            # Converter para coordenadas de pixel
-                            x_px = int(x_center * w)
-                            y_px = int(y_center * h)
-                            
-                            # Verificar se o centro do objeto está dentro do campo
-                            if field_mask[y_px, x_px] > 0:
-                                filtered_bboxes.append(bbox)
-                                filtered_labels.append(class_labels[label_idx])
-                        
-                        # Salvar imagem com máscara de campo
-                        field_img_path = os.path.join(TEMP_DIR, 'images', f"field_{i}_{img_name}")
-                        cv2.imwrite(field_img_path, img)
-                        
-                        # Salvar apenas as labels dentro do campo
-                        field_label_path = os.path.join(TEMP_DIR, 'labels', f"field_{i}_{img_name.rsplit('.', 1)[0]}.txt")
-                        with open(field_label_path, 'w') as f:
-                            for label_idx, bbox in enumerate(filtered_bboxes):
-                                x_center, y_center, width, height = bbox
-                                class_id = filtered_labels[label_idx]
-                                f.write(f"{class_id} {x_center} {y_center} {width} {height}\n")
+                            class_id = aug_labels[label_idx]
+                            f.write(f"{class_id} {x_center} {y_center} {width} {height}\n")
+                except Exception as e:
+                    print(f"Erro ao processar imagem {img_path}: {str(e)}")
+                    continue
     
     # Criar novo arquivo de configuração para dataset aumentado
     temp_data_yaml = os.path.join(TEMP_DIR, 'data.yaml')
